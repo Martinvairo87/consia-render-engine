@@ -80,11 +80,11 @@ bg.inputs[1].default_value = 0.8
 bpy.ops.mesh.primitive_plane_add(size=60, location=(0, 0, 0))
 ground = bpy.context.active_object
 
-mat = bpy.data.materials.new("GroundMat")
-mat.use_nodes = True
-bsdf = mat.node_tree.nodes["Principled BSDF"]
+ground_mat = bpy.data.materials.new("GroundMat")
+ground_mat.use_nodes = True
+bsdf = ground_mat.node_tree.nodes["Principled BSDF"]
 bsdf.inputs["Base Color"].default_value = (0.8, 0.82, 0.85, 1)
-ground.data.materials.append(mat)
+ground.data.materials.append(ground_mat)
 
 # BUILDING
 h = max({data.floors} * 0.35, 3)
@@ -93,35 +93,34 @@ bpy.ops.mesh.primitive_cube_add(location=(0, 0, h))
 tower = bpy.context.active_object
 tower.scale = (2.5, 1.8, h)
 
-mat = bpy.data.materials.new("TowerMat")
-mat.use_nodes = True
-bsdf = mat.node_tree.nodes["Principled BSDF"]
+tower_mat = bpy.data.materials.new("TowerMat")
+tower_mat.use_nodes = True
+bsdf = tower_mat.node_tree.nodes["Principled BSDF"]
 bsdf.inputs["Base Color"].default_value = (0.7, 0.75, 0.8, 1)
 bsdf.inputs["Roughness"].default_value = 0.5
-tower.data.materials.append(mat)
+tower.data.materials.append(tower_mat)
 
 # GLASS
 bpy.ops.mesh.primitive_cube_add(location=(2.6, 0, h))
 glass = bpy.context.active_object
 glass.scale = (0.05, 1.7, h * 0.95)
 
-mat = bpy.data.materials.new("GlassMat")
-mat.use_nodes = True
-bsdf = mat.node_tree.nodes["Principled BSDF"]
-
+glass_mat = bpy.data.materials.new("GlassMat")
+glass_mat.use_nodes = True
+bsdf = glass_mat.node_tree.nodes["Principled BSDF"]
+bsdf.inputs["Base Color"].default_value = (0.6, 0.8, 1.0, 1)
 if "Transmission" in bsdf.inputs:
     bsdf.inputs["Transmission"].default_value = 1.0
-
-bsdf.inputs["Base Color"].default_value = (0.6, 0.8, 1.0, 1)
 bsdf.inputs["Roughness"].default_value = 0.05
+glass.data.materials.append(glass_mat)
 
-glass.data.materials.append(mat)
-
-# LIGHT
+# SUN
 light_data = bpy.data.lights.new(name="sun", type='SUN')
 light = bpy.data.objects.new(name="sun", object_data=light_data)
 bpy.context.collection.objects.link(light)
 light.location = (10, -10, 15)
+light.rotation_euler = (0.9, 0.2, 0.8)
+light.data.energy = 3.0
 
 # CAMERA
 bpy.ops.object.camera_add(location=(10, -12, 10))
@@ -134,9 +133,9 @@ scene.render.filepath = OUTPUT_PATH
 bpy.ops.render.render(write_still=True)
 '''
 
-        script_file.write_text(blender_script)
+        script_file.write_text(blender_script, encoding="utf-8")
 
-        with open(log_file, "w") as log:
+        with open(log_file, "w", encoding="utf-8") as log:
             subprocess.run(
                 [BLENDER_BIN, "--background", "--python", str(script_file)],
                 stdout=log,
@@ -150,7 +149,11 @@ bpy.ops.render.render(write_still=True)
             "ok": True,
             "project_id": project_id,
             "status": "completed",
-            "image": str(image_file)
+            "name": data.name,
+            "floors": data.floors,
+            "prompt": data.prompt,
+            "image": str(image_file),
+            "finished_at": datetime.utcnow().isoformat() + "Z"
         })
 
     except Exception as e:
@@ -158,13 +161,28 @@ bpy.ops.render.render(write_still=True)
             "ok": False,
             "project_id": project_id,
             "status": "failed",
-            "error": str(e)
+            "name": data.name,
+            "floors": data.floors,
+            "prompt": data.prompt,
+            "error": str(e),
+            "log_file": str(log_file),
+            "finished_at": datetime.utcnow().isoformat() + "Z"
         })
+
+
+@app.get("/")
+def root():
+    return {"ok": True, "system": "CONSIA_RENDER_ENGINE", "docs": "/docs", "health": "/health"}
+
+
+@app.get("/ping")
+def ping():
+    return {"ok": True, "status": "alive"}
 
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "system": "CONSIA_RENDER_ENGINE", "blender_bin": BLENDER_BIN, "render_path": str(RENDER_PATH)}
 
 
 @app.post("/full")
@@ -182,7 +200,17 @@ def full(data: ProjectRequest):
     return {
         "ok": True,
         "project_id": project_id,
-        "status": "render_started"
+        "status": "render_started",
+        "name": data.name,
+        "floors": data.floors,
+        "prompt": data.prompt,
+        "files": {
+            "project_dir": str(project_dir),
+            "prompt_file": str(project_dir / "prompt.txt"),
+            "result_file": str(project_dir / "result.json")
+        },
+        "image_url": f"/projects/{project_id}/image",
+        "result_url": f"/projects/{project_id}/result"
     }
 
 
@@ -190,34 +218,35 @@ def full(data: ProjectRequest):
 def get_project(project_id: str):
     project_dir = RENDER_PATH / project_id
     if not project_dir.exists():
-        raise HTTPException(404, "not_found")
+        raise HTTPException(status_code=404, detail="not_found")
 
     return {
         "ok": True,
         "project_id": project_id,
-        "files": [p.name for p in project_dir.iterdir()]
+        "project_dir": str(project_dir),
+        "files": sorted([p.name for p in project_dir.iterdir()])
     }
-
-
-@app.get("/projects/{project_id}/image")
-def get_image(project_id: str):
-    file = RENDER_PATH / project_id / "render.png"
-    if not file.exists():
-        raise HTTPException(404, "image_not_ready")
-    return FileResponse(file)
 
 
 @app.get("/projects/{project_id}/result")
 def get_result(project_id: str):
     file = RENDER_PATH / project_id / "result.json"
     if not file.exists():
-        raise HTTPException(404)
-    return json.loads(file.read_text())
+        raise HTTPException(status_code=404, detail="result_not_ready")
+    return json.loads(file.read_text(encoding="utf-8"))
+
+
+@app.get("/projects/{project_id}/image")
+def get_image(project_id: str):
+    file = RENDER_PATH / project_id / "render.png"
+    if not file.exists():
+        raise HTTPException(status_code=404, detail="image_not_ready")
+    return FileResponse(file, media_type="image/png", filename="render.png")
 
 
 @app.get("/projects/{project_id}/log")
 def get_log(project_id: str):
     file = RENDER_PATH / project_id / "render.log"
     if not file.exists():
-        return {"log": ""}
-    return {"log": file.read_text()}
+        return {"ok": True, "project_id": project_id, "log": ""}
+    return {"ok": True, "project_id": project_id, "log": file.read_text(encoding="utf-8")}
