@@ -6,48 +6,42 @@ argv = sys.argv
 argv = argv[argv.index("--") + 1:]
 
 output = argv[0]
-prompt = argv[1] if len(argv) > 1 else "modern luxury tower"
+prompt = argv[1] if len(argv) > 1 else "modern tower"
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
 
 scene = bpy.context.scene
 scene.render.engine = "CYCLES"
-scene.cycles.samples = 128
-scene.render.resolution_x = 1920
-scene.render.resolution_y = 1080
+scene.cycles.samples = 16
+scene.render.resolution_x = 1280
+scene.render.resolution_y = 720
 scene.render.filepath = output
 
-bpy.ops.mesh.primitive_plane_add(size=200, location=(0, 0, 0))
+# piso
+bpy.ops.mesh.primitive_plane_add(size=100, location=(0, 0, 0))
 
-bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 12))
+# edificio simple
+bpy.ops.mesh.primitive_cube_add(size=2, location=(0, 0, 6))
 building = bpy.context.object
-building.scale = (6, 6, 12)
+building.scale = (4, 4, 6)
 
-bpy.ops.mesh.primitive_cube_add(size=2, location=(0, -5.8, 12))
-glass = bpy.context.object
-glass.scale = (5.5, 0.1, 10)
+# material
+mat = bpy.data.materials.new(name="BuildingMat")
+mat.use_nodes = True
+bsdf = mat.node_tree.nodes.get("Principled BSDF")
+bsdf.inputs["Base Color"].default_value = (0.7, 0.7, 0.75, 1.0)
+bsdf.inputs["Roughness"].default_value = 0.4
+building.data.materials.append(mat)
 
-glass_mat = bpy.data.materials.new(name="Glass")
-glass_mat.use_nodes = True
-bsdf = glass_mat.node_tree.nodes.get("Principled BSDF")
-bsdf.inputs["Transmission"].default_value = 1.0
-bsdf.inputs["Roughness"].default_value = 0.03
-glass.data.materials.append(glass_mat)
-
-concrete = bpy.data.materials.new(name="Concrete")
-concrete.use_nodes = True
-pbsdf = concrete.node_tree.nodes.get("Principled BSDF")
-pbsdf.inputs["Base Color"].default_value = (0.62, 0.62, 0.62, 1)
-pbsdf.inputs["Roughness"].default_value = 0.65
-building.data.materials.append(concrete)
-
-bpy.ops.object.light_add(type="SUN", location=(20, -20, 30))
+# luz
+bpy.ops.object.light_add(type="SUN", location=(10, -10, 20))
 sun = bpy.context.object
-sun.data.energy = 4.0
+sun.data.energy = 3.0
 
-bpy.ops.object.camera_add(location=(28, -28, 18))
+# cámara
+bpy.ops.object.camera_add(location=(18, -18, 10))
 cam = bpy.context.object
-cam.rotation_euler = (math.radians(62), 0, math.radians(45))
+cam.rotation_euler = (math.radians(65), 0, math.radians(45))
 scene.camera = cam
 
 bpy.ops.render.render(write_still=True)
