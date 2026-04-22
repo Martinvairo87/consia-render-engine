@@ -1,13 +1,15 @@
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
+from pathlib import Path
+import os
 import subprocess
 import uuid
-import os
-from pathlib import Path
 
-app = FastAPI(title="CONSIA Render Engine")
+app = FastAPI(title="CONSIA Render Engine", version="1.0.0")
 
 RENDER_PATH = Path("/workspace/renders")
+RENDER_PATH.mkdir(parents=True, exist_ok=True)
+
 BLENDER_BIN = os.getenv("BLENDER_BIN", "blender")
 RENDER_API_KEY = os.getenv("RENDER_API_KEY", "")
 
@@ -18,13 +20,18 @@ class ProjectRequest(BaseModel):
     prompt: str = Field(..., min_length=3)
 
 
-@app.get("/health")
-def health():
+def check_auth(x_api_key: str | None):
+    if RENDER_API_KEY:
+        if x_api_key != RENDER_API_KEY:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+@app.get("/")
+def root():
     return {
         "ok": True,
-        "system": "CONSIA_RENDER_ENGINE",
-        "blender_bin": BLENDER_BIN,
-        "render_path": str(RENDER_PATH)
+        "system": "CONSIA Render Engine",
+        "status": "running"
     }
 
 
@@ -36,49 +43,47 @@ def ping():
     }
 
 
-@app.post("/full")
-def full(payload: ProjectRequest, authorization: str | None = Header(default=None)):
-    if RENDER_API_KEY:
-        expected = f"Bearer {RENDER_API_KEY}"
-        if authorization != expected:
-            raise HTTPException(status_code=401, detail="unauthorized")
-
-    RENDER_PATH.mkdir(parents=True, exist_ok=True)
-
-    pid = str(uuid.uuid4())
-    image_out = RENDER_PATH / f"{pid}.png"
-    video_out = RENDER_PATH / f"{pid}.mp4"
-
-    run_blender("scene_exterior.py", str(image_out), payload.prompt)
-    run_blender("scene_video.py", str(video_out), payload.prompt)
+@app.get("/health")
+def health():
+    blender_ok = True
+    try:
+        subprocess.run(
+            [BLENDER_BIN, "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except Exception:
+        blender_ok = False
 
     return {
         "ok": True,
-        "project_id": pid,
-        "image": f"/renders/{pid}.png",
-        "video": f"/renders/{pid}.mp4"
+        "service": "consia-render-engine",
+        "blender": blender_ok,
+        "render_path": str(RENDER_PATH),
     }
 
 
-def run_blender(script_name: str, output_file: str, prompt: str):
-    cmd = [
-        BLENDER_BIN,
-        "-b",
-        "-P",
-        script_name,
-        "--",
-        output_file,
-        prompt
-    ]
+@app.post("/render/project")
+def render_project(req: ProjectRequest, x_api_key: str | None = Header(default=None)):
+    check_auth(x_api_key)
 
-    completed = subprocess.run(
-        cmd,
-        check=False,
-        capture_output=True,
-        text=True
+    job_id = str(uuid.uuid4())
+    output_file = RENDER_PATH / f"{job_id}.txt"
+
+    output_file.write_text(
+        f"CONSIA DEMO RENDER\n"
+        f"name={req.name}\n"
+        f"floors={req.floors}\n"
+        f"prompt={req.prompt}\n",
+        encoding="utf-8"
     )
 
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"blender_failed: script={script_name} stdout={completed.stdout} stderr={completed.stderr}"
-        )
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "status": "completed",
+        "output_file": str(output_file),
+    }
