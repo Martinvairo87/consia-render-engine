@@ -50,169 +50,107 @@ def run_render(project_id: str, project_dir: Path, data: ProjectRequest):
 
         blender_script = f'''
 import bpy
-import math
 
 OUTPUT_PATH = r"{str(image_file)}"
 
-# Reset total
 bpy.ops.wm.read_factory_settings(use_empty=True)
 
 scene = bpy.context.scene
 scene.render.engine = 'BLENDER_EEVEE'
 scene.render.resolution_x = 1280
 scene.render.resolution_y = 720
-scene.render.film_transparent = False
 scene.render.image_settings.file_format = 'PNG'
 
-# World
-world = bpy.data.worlds["World"]
-world.use_nodes = True
-bg = world.node_tree.nodes["Background"]
-bg.inputs[0].default_value = (0.92, 0.95, 1.0, 1.0)
-bg.inputs[1].default_value = 0.9
+# WORLD FIX
+if bpy.context.scene.world is None:
+    world = bpy.data.worlds.new("World")
+    bpy.context.scene.world = world
+else:
+    world = bpy.context.scene.world
 
-# Ground
+world.use_nodes = True
+bg = world.node_tree.nodes.get("Background")
+if bg is None:
+    bg = world.node_tree.nodes.new(type="ShaderNodeBackground")
+
+bg.inputs[0].default_value = (0.92, 0.95, 1.0, 1.0)
+bg.inputs[1].default_value = 0.8
+
+# GROUND
 bpy.ops.mesh.primitive_plane_add(size=60, location=(0, 0, 0))
 ground = bpy.context.active_object
-ground.name = "Ground"
 
-ground_mat = bpy.data.materials.new(name="GroundMat")
-ground_mat.use_nodes = True
-bsdf = ground_mat.node_tree.nodes["Principled BSDF"]
-bsdf.inputs["Base Color"].default_value = (0.78, 0.80, 0.82, 1.0)
-bsdf.inputs["Roughness"].default_value = 0.95
-ground.data.materials.append(ground_mat)
+mat = bpy.data.materials.new("GroundMat")
+mat.use_nodes = True
+bsdf = mat.node_tree.nodes["Principled BSDF"]
+bsdf.inputs["Base Color"].default_value = (0.8, 0.82, 0.85, 1)
+ground.data.materials.append(mat)
 
-# Building base
-bpy.ops.mesh.primitive_cube_add(location=(0, 0, {max(data.floors * 0.35, 2.5)}))
+# BUILDING
+h = max({data.floors} * 0.35, 3)
+
+bpy.ops.mesh.primitive_cube_add(location=(0, 0, h))
 tower = bpy.context.active_object
-tower.name = "Tower"
-tower.scale = (2.6, 1.8, max({data.floors} * 0.35, 2.5))
+tower.scale = (2.5, 1.8, h)
 
-tower_mat = bpy.data.materials.new(name="TowerMat")
-tower_mat.use_nodes = True
-bsdf = tower_mat.node_tree.nodes["Principled BSDF"]
-bsdf.inputs["Base Color"].default_value = (0.72, 0.75, 0.78, 1.0)
-bsdf.inputs["Roughness"].default_value = 0.55
-bsdf.inputs["Metallic"].default_value = 0.08
-tower.data.materials.append(tower_mat)
+mat = bpy.data.materials.new("TowerMat")
+mat.use_nodes = True
+bsdf = mat.node_tree.nodes["Principled BSDF"]
+bsdf.inputs["Base Color"].default_value = (0.7, 0.75, 0.8, 1)
+bsdf.inputs["Roughness"].default_value = 0.5
+tower.data.materials.append(mat)
 
-# Glass facade panel
-bpy.ops.mesh.primitive_cube_add(location=(2.61, 0, max({data.floors} * 0.35, 2.5)))
+# GLASS
+bpy.ops.mesh.primitive_cube_add(location=(2.6, 0, h))
 glass = bpy.context.active_object
-glass.name = "GlassFacade"
-glass.scale = (0.06, 1.55, max({data.floors} * 0.33, 2.3))
+glass.scale = (0.05, 1.7, h * 0.95)
 
-glass_mat = bpy.data.materials.new(name="GlassMat")
-glass_mat.use_nodes = True
-bsdf = glass_mat.node_tree.nodes["Principled BSDF"]
-bsdf.inputs["Base Color"].default_value = (0.55, 0.75, 0.95, 1.0)
-bsdf.inputs["Transmission Weight"].default_value = 1.0
-bsdf.inputs["Roughness"].default_value = 0.08
-bsdf.inputs["IOR"].default_value = 1.45
-glass.data.materials.append(glass_mat)
+mat = bpy.data.materials.new("GlassMat")
+mat.use_nodes = True
+bsdf = mat.node_tree.nodes["Principled BSDF"]
 
-# Side volume
-bpy.ops.mesh.primitive_cube_add(location=(-1.8, -2.0, max({data.floors} * 0.12, 1.2)))
-side = bpy.context.active_object
-side.name = "Podium"
-side.scale = (1.8, 1.3, max({data.floors} * 0.12, 1.2))
-side.data.materials.append(tower_mat)
+if "Transmission" in bsdf.inputs:
+    bsdf.inputs["Transmission"].default_value = 1.0
 
-# Sun light
-sun_data = bpy.data.lights.new(name="Sun", type='SUN')
-sun = bpy.data.objects.new(name="Sun", object_data=sun_data)
-bpy.context.collection.objects.link(sun)
-sun.location = (10, -10, 18)
-sun.rotation_euler = (math.radians(50), 0, math.radians(35))
-sun.data.energy = 3.2
+bsdf.inputs["Base Color"].default_value = (0.6, 0.8, 1.0, 1)
+bsdf.inputs["Roughness"].default_value = 0.05
 
-# Area light
-area_data = bpy.data.lights.new(name="Area", type='AREA')
-area = bpy.data.objects.new(name="Area", object_data=area_data)
-bpy.context.collection.objects.link(area)
-area.location = (6, -4, 8)
-area.rotation_euler = (math.radians(65), 0, math.radians(55))
-area.data.energy = 3000
-area.data.shape = 'RECTANGLE'
-area.data.size = 8
-area.data.size_y = 8
+glass.data.materials.append(mat)
 
-# Camera
-cam_data = bpy.data.cameras.new(name="Camera")
-cam = bpy.data.objects.new("Camera", cam_data)
-bpy.context.collection.objects.link(cam)
-cam.location = (12, -14, 8)
-cam.rotation_euler = (math.radians(68), 0, math.radians(40))
+# LIGHT
+light_data = bpy.data.lights.new(name="sun", type='SUN')
+light = bpy.data.objects.new(name="sun", object_data=light_data)
+bpy.context.collection.objects.link(light)
+light.location = (10, -10, 15)
+
+# CAMERA
+bpy.ops.object.camera_add(location=(10, -12, 10))
+cam = bpy.context.active_object
+cam.rotation_euler = (1.1, 0, 0.9)
 scene.camera = cam
 
-# Small river plane for premium look
-bpy.ops.mesh.primitive_plane_add(size=80, location=(18, 18, -0.02))
-river = bpy.context.active_object
-river.rotation_euler = (0, 0, math.radians(45))
-
-river_mat = bpy.data.materials.new(name="RiverMat")
-river_mat.use_nodes = True
-bsdf = river_mat.node_tree.nodes["Principled BSDF"]
-bsdf.inputs["Base Color"].default_value = (0.25, 0.45, 0.65, 1.0)
-bsdf.inputs["Metallic"].default_value = 0.0
-bsdf.inputs["Roughness"].default_value = 0.04
-bsdf.inputs["Transmission Weight"].default_value = 0.15
-river.data.materials.append(river_mat)
-
+# RENDER
 scene.render.filepath = OUTPUT_PATH
 bpy.ops.render.render(write_still=True)
 '''
 
-        script_file.write_text(blender_script, encoding="utf-8")
+        script_file.write_text(blender_script)
 
-        with open(log_file, "w", encoding="utf-8") as lf:
-            process = subprocess.run(
-                [BLENDER_BIN, "-b", "--python", str(script_file)],
-                stdout=lf,
-                stderr=lf,
-                text=True
+        with open(log_file, "w") as log:
+            subprocess.run(
+                [BLENDER_BIN, "--background", "--python", str(script_file)],
+                stdout=log,
+                stderr=log
             )
 
-        if process.returncode != 0:
-            write_json(result_file, {
-                "ok": False,
-                "project_id": project_id,
-                "status": "failed",
-                "name": data.name,
-                "floors": data.floors,
-                "prompt": data.prompt,
-                "error": "blender_render_failed",
-                "log_file": str(log_file),
-                "finished_at": datetime.utcnow().isoformat() + "Z"
-            })
-            return
-
         if not image_file.exists():
-            write_json(result_file, {
-                "ok": False,
-                "project_id": project_id,
-                "status": "failed",
-                "name": data.name,
-                "floors": data.floors,
-                "prompt": data.prompt,
-                "error": "image_not_generated",
-                "log_file": str(log_file),
-                "finished_at": datetime.utcnow().isoformat() + "Z"
-            })
-            return
+            raise Exception("image_not_generated")
 
         write_json(result_file, {
             "ok": True,
             "project_id": project_id,
             "status": "completed",
-            "name": data.name,
-            "floors": data.floors,
-            "prompt": data.prompt,
-            "image_file": str(image_file),
-            "image_url": f"/projects/{project_id}/image",
-            "log_file": str(log_file),
-            "finished_at": datetime.utcnow().isoformat() + "Z"
+            "image": str(image_file)
         })
 
     except Exception as e:
@@ -220,37 +158,13 @@ bpy.ops.render.render(write_still=True)
             "ok": False,
             "project_id": project_id,
             "status": "failed",
-            "name": data.name,
-            "floors": data.floors,
-            "prompt": data.prompt,
-            "error": str(e),
-            "finished_at": datetime.utcnow().isoformat() + "Z"
+            "error": str(e)
         })
-
-
-@app.get("/")
-def root():
-    return {
-        "ok": True,
-        "system": "CONSIA_RENDER_ENGINE",
-        "docs": "/docs",
-        "health": "/health"
-    }
-
-
-@app.get("/ping")
-def ping():
-    return {"ok": True, "status": "alive"}
 
 
 @app.get("/health")
 def health():
-    return {
-        "ok": True,
-        "system": "CONSIA_RENDER_ENGINE",
-        "blender_bin": BLENDER_BIN,
-        "render_path": str(RENDER_PATH)
-    }
+    return {"ok": True}
 
 
 @app.post("/full")
@@ -268,17 +182,7 @@ def full(data: ProjectRequest):
     return {
         "ok": True,
         "project_id": project_id,
-        "status": "render_started",
-        "name": data.name,
-        "floors": data.floors,
-        "prompt": data.prompt,
-        "files": {
-            "project_dir": str(project_dir),
-            "prompt_file": str(project_dir / "prompt.txt"),
-            "result_file": str(project_dir / "result.json")
-        },
-        "image_url": f"/projects/{project_id}/image",
-        "result_url": f"/projects/{project_id}/result"
+        "status": "render_started"
     }
 
 
@@ -286,54 +190,34 @@ def full(data: ProjectRequest):
 def get_project(project_id: str):
     project_dir = RENDER_PATH / project_id
     if not project_dir.exists():
-        raise HTTPException(status_code=404, detail="project_not_found")
+        raise HTTPException(404, "not_found")
 
     return {
         "ok": True,
         "project_id": project_id,
-        "project_dir": str(project_dir),
-        "files": sorted([p.name for p in project_dir.iterdir()])
+        "files": [p.name for p in project_dir.iterdir()]
     }
-
-
-@app.get("/projects/{project_id}/result")
-def get_result(project_id: str):
-    project_dir = RENDER_PATH / project_id
-    if not project_dir.exists():
-        raise HTTPException(status_code=404, detail="project_not_found")
-
-    result_file = project_dir / "result.json"
-    if not result_file.exists():
-        raise HTTPException(status_code=404, detail="result_not_ready")
-
-    return json.loads(result_file.read_text(encoding="utf-8"))
 
 
 @app.get("/projects/{project_id}/image")
 def get_image(project_id: str):
-    project_dir = RENDER_PATH / project_id
-    if not project_dir.exists():
-        raise HTTPException(status_code=404, detail="project_not_found")
+    file = RENDER_PATH / project_id / "render.png"
+    if not file.exists():
+        raise HTTPException(404, "image_not_ready")
+    return FileResponse(file)
 
-    image_file = project_dir / "render.png"
-    if not image_file.exists():
-        raise HTTPException(status_code=404, detail="image_not_ready")
 
-    return FileResponse(image_file, media_type="image/png", filename=f"{project_id}.png")
+@app.get("/projects/{project_id}/result")
+def get_result(project_id: str):
+    file = RENDER_PATH / project_id / "result.json"
+    if not file.exists():
+        raise HTTPException(404)
+    return json.loads(file.read_text())
 
 
 @app.get("/projects/{project_id}/log")
 def get_log(project_id: str):
-    project_dir = RENDER_PATH / project_id
-    if not project_dir.exists():
-        raise HTTPException(status_code=404, detail="project_not_found")
-
-    log_file = project_dir / "render.log"
-    if not log_file.exists():
-        raise HTTPException(status_code=404, detail="log_not_ready")
-
-    return {
-        "ok": True,
-        "project_id": project_id,
-        "log": log_file.read_text(encoding="utf-8")
-    }
+    file = RENDER_PATH / project_id / "render.log"
+    if not file.exists():
+        return {"log": ""}
+    return {"log": file.read_text()}
