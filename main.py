@@ -11,10 +11,12 @@ RENDER_PATH = Path("/workspace/renders")
 BLENDER_BIN = os.getenv("BLENDER_BIN", "blender")
 RENDER_API_KEY = os.getenv("RENDER_API_KEY", "")
 
+
 class ProjectRequest(BaseModel):
     name: str = Field(..., min_length=1)
     floors: int = Field(default=12, ge=1, le=120)
     prompt: str = Field(..., min_length=3)
+
 
 @app.get("/health")
 def health():
@@ -24,6 +26,15 @@ def health():
         "blender_bin": BLENDER_BIN,
         "render_path": str(RENDER_PATH)
     }
+
+
+@app.get("/ping")
+def ping():
+    return {
+        "ok": True,
+        "status": "alive"
+    }
+
 
 @app.post("/full")
 def full(payload: ProjectRequest, authorization: str | None = Header(default=None)):
@@ -47,6 +58,7 @@ def full(payload: ProjectRequest, authorization: str | None = Header(default=Non
         "image": f"/renders/{pid}.png",
         "video": f"/renders/{pid}.mp4"
     }
+
 
 def run_blender(script_name: str, output_file: str, prompt: str):
     cmd = [
